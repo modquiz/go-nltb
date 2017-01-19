@@ -44,8 +44,9 @@ import (
 )
 
 // global const:
-const numOfTags int = 26
+const numOfTags int = 36
 
+// The character used to split the string from the part of speech tag in the Corpus
 const SPLITCHARS string = "/"
 
 // global regex
@@ -102,18 +103,28 @@ func initTagConversionMap() {
 	TagStrToInt["dt"] = 11
 	TagStrToInt["fw"] = 12
 	TagStrToInt["jj"] = 13
-	TagStrToInt["ls"] = 14
-	TagStrToInt["nn"] = 15
-	TagStrToInt["np"] = 16
-	TagStrToInt["pos"] = 17
-	TagStrToInt["pr"] = 18
-	TagStrToInt["rb"] = 19
-	TagStrToInt["sym"] = 20
-	TagStrToInt["to"] = 21
-	TagStrToInt["uh"] = 22
-	TagStrToInt["vb"] = 23
-	TagStrToInt["md"] = 24
-	TagStrToInt["in"] = 25
+	TagStrToInt["jj-tl"] = 14
+	TagStrToInt["ls"] = 15
+	TagStrToInt["nn"] = 16
+	TagStrToInt["nn-tl"] = 17
+	TagStrToInt["nnp"] = 18
+	TagStrToInt["np"] = 19
+	TagStrToInt["nps"] = 20
+	TagStrToInt["pos"] = 21
+	TagStrToInt["pr"] = 22
+	TagStrToInt["rb"] = 23
+	TagStrToInt["sym"] = 24
+	TagStrToInt["to"] = 25
+	TagStrToInt["uh"] = 26
+	TagStrToInt["vb"] = 27
+	TagStrToInt["vbn"] = 28
+	TagStrToInt["vbd"] = 29
+	TagStrToInt["vbz"] = 30
+	TagStrToInt["md"] = 31
+	TagStrToInt["in"] = 32
+	TagStrToInt["at"] = 33
+	TagStrToInt["bez"] = 34
+	TagStrToInt["ppss"] = 35
 
 	TagIntToStr[0] = "bos"
 	TagIntToStr[1] = "$"
@@ -129,26 +140,35 @@ func initTagConversionMap() {
 	TagIntToStr[11] = "dt"
 	TagIntToStr[12] = "fw"
 	TagIntToStr[13] = "jj"
-	TagIntToStr[14] = "ls"
-	TagIntToStr[15] = "nn"
-	TagIntToStr[16] = "np"
-	TagIntToStr[17] = "pos"
-	TagIntToStr[18] = "pr"
-	TagIntToStr[19] = "rb"
-	TagIntToStr[20] = "sym"
-	TagIntToStr[21] = "to"
-	TagIntToStr[22] = "uh"
-	TagIntToStr[23] = "vb"
-	TagIntToStr[24] = "md"
-	TagIntToStr[25] = "in"
+	TagIntToStr[14] = "jj-tl"
+	TagIntToStr[15] = "ls"
+	TagIntToStr[16] = "nn"
+	TagIntToStr[17] = "nn-tl"
+	TagIntToStr[18] = "nnp"
+	TagIntToStr[19] = "np"
+	TagIntToStr[20] = "nps"
+	TagIntToStr[21] = "pos"
+	TagIntToStr[22] = "pr"
+	TagIntToStr[23] = "rb"
+	TagIntToStr[24] = "sym"
+	TagIntToStr[25] = "to"
+	TagIntToStr[26] = "uh"
+	TagIntToStr[27] = "vb"
+	TagIntToStr[28] = "vbn"
+	TagIntToStr[29] = "vbd"
+	TagIntToStr[30] = "vbz"
+	TagIntToStr[31] = "md"
+	TagIntToStr[32] = "in"
+	TagIntToStr[33] = "at"
+	TagIntToStr[34] = "bez"
+	TagIntToStr[35] = "ppss"
 }
 
 func addToDictionary(dictionary map[string][]TagFrequency, transMatrix [][]float32, path string) (map[string][]TagFrequency, [][]float32) {
-	fmt.Println(path)
 	// read through the corpus file to populate the dictionary and transMatrix
 	raw, err := ioutil.ReadFile(path)
-	if err != nil {
-		fmt.Println("could not read the file for tagging")
+	if err != nil && !strings.HasSuffix(path, "\\") {
+		fmt.Printf("could not read the file %v for tagging", path)
 		return dictionary, transMatrix
 	}
 	rawString := string(raw[:])
@@ -165,10 +185,12 @@ func addToDictionary(dictionary map[string][]TagFrequency, transMatrix [][]float
 
 	for _, word := range textArry {
 		wrdArry := strings.Split(word, SPLITCHARS)
-		currTag = wrdArry[1]
-		incrementUnigramWrd(dictionary, wrdArry[0], currTag)
-		incrementTransMatrix(&transMatrix, TagStrToInt[prevTag], TagStrToInt[currTag])
-		prevTag = currTag
+		if len(wrdArry) > 1 {
+			currTag = wrdArry[1]
+			incrementUnigramWrd(dictionary, wrdArry[0], currTag)
+			incrementTransMatrix(&transMatrix, TagStrToInt[prevTag], TagStrToInt[currTag])
+			prevTag = currTag
+		}
 	}
 	// everything is counted now convert the dictionary and TransMatrix to probabilistic
 	convertDictToProb(dictionary)
@@ -197,7 +219,6 @@ func New(searchDir string) *Tagger {
 
 	// for every fileint he brown corpus do
 	err := filepath.Walk(searchDir, func(searchDir string, f os.FileInfo, err error) error {
-		fmt.Println(searchDir)
 		dictionary, transMatrix = addToDictionary(dictionary, transMatrix, searchDir)
 		return nil
 	})
@@ -208,7 +229,6 @@ func New(searchDir string) *Tagger {
 
 	// SETUP THE COPYRIGHT DFA
 	// symbols, dfa := mkNoticeDFA()
-	fmt.Println(dictionary)
 	return &Tagger{Dictionary: dictionary, TransMatrix: transMatrix}
 }
 
@@ -226,6 +246,9 @@ func incrementTransMatrix(transMatrix *[][]float32, prevTagIndex int, currTagInd
 func incrementUnigramWrd(dictionary map[string][]TagFrequency, word string, tag string) {
 	// dictionary is the map used for unigram word count/frequency
 	// it is a key->slice of TagFrequency objects
+	if tag == "nil" {
+		return
+	}
 	if dictionary[word] != nil {
 		for i := 0; i < len(dictionary[word]); i++ {
 			if tag == dictionary[word][i].tag {

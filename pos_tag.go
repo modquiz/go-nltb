@@ -1,7 +1,6 @@
 package nltb
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -11,19 +10,28 @@ import (
 )
 
 type TaggedWord struct {
-	tagger.TaggedWord
+	Word      string
+	Tag       string
+	byteStart int
+}
+
+type POSTag struct {
+	goTagger *tagger.Tagger
+}
+
+/* Init parts of speech Tagging */
+func (p *POSTag) Init() {
+	_, file, _, _ := runtime.Caller(0)
+	filename := filepath.Dir(file) + string(os.PathSeparator) + "brown" + string(os.PathSeparator)
+	p.goTagger = tagger.New(filename)
 }
 
 /* Does Parts of Speech Tagging */
-func POSTag(byteString []byte) []TaggedWord {
-	_, file, _, _ := runtime.Caller(0)
-	filename := filepath.Dir(file) + string(os.PathSeparator) + "brown" + string(os.PathSeparator)
-	fmt.Println(filename)
-	goTagger := tagger.New(filename)
-	taggedWord := goTagger.TagBytes(byteString)
+func (p *POSTag) Do(byteString []byte) []TaggedWord {
+	taggedWord := p.goTagger.TagBytes(byteString)
 
 	var returnTaggedWord []TaggedWord
 	copier.Copy(&returnTaggedWord, &taggedWord)
-	fmt.Println(returnTaggedWord)
+
 	return returnTaggedWord
 }
