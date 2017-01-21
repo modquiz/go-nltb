@@ -34,427 +34,15 @@ POSSIBILITY OF SUCH DAMAGE.
 package tagger
 
 import (
-	"bytes"
-	"fmt"
-	"io/ioutil"
-	"os"
-	"path/filepath"
-	"regexp"
 	"strings"
 )
 
-// global const:
-const numOfTags int = 36
-
-// The character used to split the string from the part of speech tag in the Corpus
-const SPLITCHARS string = "/"
-
-// global regex
-var copyright = regexp.MustCompile("(\\\\[(]co)")
-
-// A struct/pair for the dictionary value
-// The dictionary actually stores an array of these.
-type TagFrequency struct {
-	tag  string
-	freq float32
-}
-
-// The Tagger Object
-type Tagger struct {
-	Dictionary  map[string][]TagFrequency
-	TransMatrix [][]float32
-	// for the copyright extraction
-	CopyrightDFA  map[Tri]int
-	CopyrightSyms string
-}
-
-type TaggedWord struct {
-	Word      string
-	Tag       string
-	byteStart int
-}
-
-// three variable structure used in DFA translation
-type Tri struct {
-	state int
-	word  string
-	pos   string
-}
-
-// create maps for converting tag string to integer and vice versa
-var TagStrToInt = make(map[string]int)
-var TagIntToStr = make(map[int]string)
-
-// intitalizes the map used to convert the integer and string
-// representation of part of speech tags
-func initTagConversionMap() {
-
-	TagStrToInt["bos"] = 0
-	TagStrToInt["$"] = 1
-	TagStrToInt["\""] = 2
-	TagStrToInt["("] = 3
-	TagStrToInt[")"] = 4
-	TagStrToInt[","] = 5
-	TagStrToInt["--"] = 6
-	TagStrToInt["."] = 7
-	TagStrToInt[":"] = 8
-	TagStrToInt["cc"] = 9
-	TagStrToInt["cd"] = 10
-	TagStrToInt["dt"] = 11
-	TagStrToInt["fw"] = 12
-	TagStrToInt["jj"] = 13
-	TagStrToInt["jj-tl"] = 14
-	TagStrToInt["ls"] = 15
-	TagStrToInt["nn"] = 16
-	TagStrToInt["nn-tl"] = 17
-	TagStrToInt["nnp"] = 18
-	TagStrToInt["np"] = 19
-	TagStrToInt["nps"] = 20
-	TagStrToInt["pos"] = 21
-	TagStrToInt["pr"] = 22
-	TagStrToInt["rb"] = 23
-	TagStrToInt["sym"] = 24
-	TagStrToInt["to"] = 25
-	TagStrToInt["uh"] = 26
-	TagStrToInt["vb"] = 27
-	TagStrToInt["vbn"] = 28
-	TagStrToInt["vbd"] = 29
-	TagStrToInt["vbz"] = 30
-	TagStrToInt["md"] = 31
-	TagStrToInt["in"] = 32
-	TagStrToInt["at"] = 33
-	TagStrToInt["bez"] = 34
-	TagStrToInt["ppss"] = 35
-
-	TagIntToStr[0] = "bos"
-	TagIntToStr[1] = "$"
-	TagIntToStr[2] = "\""
-	TagIntToStr[3] = "("
-	TagIntToStr[4] = ")"
-	TagIntToStr[5] = ","
-	TagIntToStr[6] = "--"
-	TagIntToStr[7] = "."
-	TagIntToStr[8] = ":"
-	TagIntToStr[9] = "cc"
-	TagIntToStr[10] = "cd"
-	TagIntToStr[11] = "dt"
-	TagIntToStr[12] = "fw"
-	TagIntToStr[13] = "jj"
-	TagIntToStr[14] = "jj-tl"
-	TagIntToStr[15] = "ls"
-	TagIntToStr[16] = "nn"
-	TagIntToStr[17] = "nn-tl"
-	TagIntToStr[18] = "nnp"
-	TagIntToStr[19] = "np"
-	TagIntToStr[20] = "nps"
-	TagIntToStr[21] = "pos"
-	TagIntToStr[22] = "pr"
-	TagIntToStr[23] = "rb"
-	TagIntToStr[24] = "sym"
-	TagIntToStr[25] = "to"
-	TagIntToStr[26] = "uh"
-	TagIntToStr[27] = "vb"
-	TagIntToStr[28] = "vbn"
-	TagIntToStr[29] = "vbd"
-	TagIntToStr[30] = "vbz"
-	TagIntToStr[31] = "md"
-	TagIntToStr[32] = "in"
-	TagIntToStr[33] = "at"
-	TagIntToStr[34] = "bez"
-	TagIntToStr[35] = "ppss"
-}
-
-func addToDictionary(dictionary map[string][]TagFrequency, transMatrix [][]float32, path string) (map[string][]TagFrequency, [][]float32) {
-	// read through the corpus file to populate the dictionary and transMatrix
-	raw, err := ioutil.ReadFile(path)
-	if err != nil && !strings.HasSuffix(path, "\\") {
-		fmt.Printf("could not read the file %v for tagging", path)
-		return dictionary, transMatrix
-	}
-	rawString := string(raw[:])
-
-	prevTag := "."
-	currTag := ""
-	// I need to use the split feature on the coprus. So the input Corpus must have three
-	// spaces between each word|~|tag pair. Once I have each word|~|tag pair I can
-	// then split on the delimeter. Assumptions are made but I am assuming a safe input
-	// file which I feel is acceptable, since if you save a file you know what it will
-	// look like.
-	textArry := strings.Split(rawString, " ")
-	// textArry = textArry[:len(textArry)-1]
-
-	for _, word := range textArry {
-		wrdArry := strings.Split(word, SPLITCHARS)
-		if len(wrdArry) > 1 {
-			currTag = wrdArry[1]
-			incrementUnigramWrd(dictionary, wrdArry[0], currTag)
-			incrementTransMatrix(&transMatrix, TagStrToInt[prevTag], TagStrToInt[currTag])
-			prevTag = currTag
-		}
-	}
-	// everything is counted now convert the dictionary and TransMatrix to probabilistic
-	convertDictToProb(dictionary)
-	convertTransMatrixToProb(&transMatrix)
-
-	return dictionary, transMatrix
-
-}
-
-// Initialization for the Tagger object
-// Takes a file path and will create the unigram dictionary and transition
-// matrix required for sentence tagging and NLP processing
-func New(searchDir string) *Tagger {
-
-	// initialize my TagStrToInt and TagIntToStr
-	initTagConversionMap()
-
-	// initialize the dictionary
-	var dictionary = make(map[string][]TagFrequency)
-
-	// Initialize the transition Matrix,
-	var transMatrix = make([][]float32, numOfTags)
-	for row := range transMatrix {
-		transMatrix[row] = make([]float32, numOfTags)
-	}
-
-	// for every fileint he brown corpus do
-	err := filepath.Walk(searchDir, func(searchDir string, f os.FileInfo, err error) error {
-		dictionary, transMatrix = addToDictionary(dictionary, transMatrix, searchDir)
-		return nil
-	})
-
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	// SETUP THE COPYRIGHT DFA
-	// symbols, dfa := mkNoticeDFA()
-	return &Tagger{Dictionary: dictionary, TransMatrix: transMatrix}
-}
-
-// This is the counter of tag transitions. Moving from one part of speech tag
-// to the other. When reading the input corpus this function is called to
-// increment/make note of every part of speech tag transition.
-// transitionOccurances = transMatrix[prev POS tag][current POS tag]
-func incrementTransMatrix(transMatrix *[][]float32, prevTagIndex int, currTagIndex int) {
-	(*transMatrix)[prevTagIndex][currTagIndex]++
-}
-
-// Given the unigram word dictionary, a word and the given part of speech
-// tag for the word this will increment if the word already existed in the dictionary
-// if the word did not this will create a new entry and set the times seen to 1
-func incrementUnigramWrd(dictionary map[string][]TagFrequency, word string, tag string) {
-	// dictionary is the map used for unigram word count/frequency
-	// it is a key->slice of TagFrequency objects
-	if tag == "nil" {
-		return
-	}
-	if dictionary[word] != nil {
-		for i := 0; i < len(dictionary[word]); i++ {
-			if tag == dictionary[word][i].tag {
-				dictionary[word][i].freq++
-				return
-			}
-		}
-		dictionary[word] = append(dictionary[word], TagFrequency{tag, 1})
-		return
-	} else {
-		dictionary[word] = append(dictionary[word], TagFrequency{tag, 1})
-		return
-	}
-}
-
-// This will convert the dictionary which was in the form of
-// counted occurances into a dictionary of probability for each part of speech
-// tag given a specific word
-func convertDictToProb(dictionary map[string][]TagFrequency) {
-	// dictionary is a global variable
-	var total float32
-	for key := range dictionary {
-		total = 0
-		for i := 0; i < len(dictionary[key]); i++ {
-			total = total + dictionary[key][i].freq
-		}
-		for i := 0; i < len(dictionary[key]); i++ {
-			dictionary[key][i].freq = dictionary[key][i].freq / total
-		}
-	}
-}
-
-// This will convert the Transition Matrix to the probability
-// Transition matrix the likelyhood of a given part of speech tag transition.
-// Moving from tag A to tag B will result in what probility.
-// transMatrix[FromTagA][ToTagB] = Probability X
-// This is where the smoothing will be implemented
-// I am using Laplace Smoothing across the transitional probability
-// This means that every transition has a small probability of happeing
-func convertTransMatrixToProb(transMatrix *[][]float32) {
-	// transMatrix is a global variable
-	var total float32
-
-	for row := 0; row < numOfTags; row++ {
-		total = float32(numOfTags)
-		for col := 0; col < numOfTags; col++ {
-			total += (*transMatrix)[row][col]
-		}
-
-		for col := 0; col < numOfTags; col++ {
-			(*transMatrix)[row][col] = ((*transMatrix)[row][col] + 1) / total
-		}
-	}
-}
-
-// Given a word with an unknown part of speech. Using a model based from the
-// Brill tagger, Krymolowski and Roth 1998 research (http://www.aclweb.org/anthology/P98-2186)
-// This returns a guessed part of speech for unknown words
-func tagUnkown(word string) string {
-
-	// perform an N for loop checking for integer ascii value
-	var i int
-	for i = 0; i < len(word); i++ {
-		if word[i] > 47 && word[i] < 58 {
-			return "cd"
-		}
-	}
-
-	loWord := strings.ToLower(word)
-
-	switch {
-	case strings.HasSuffix(loWord, "able"):
-		return "jj"
-	case strings.HasSuffix(loWord, "ible"):
-		return "jj"
-	case strings.HasSuffix(loWord, "ic"):
-		return "jj"
-	case strings.HasSuffix(loWord, "ous"):
-		return "jj"
-	case strings.HasSuffix(loWord, "al"):
-		return "jj"
-	case strings.HasSuffix(loWord, "ful"):
-		return "jj"
-	case strings.HasSuffix(loWord, "less"):
-		return "jj"
-	case strings.HasSuffix(loWord, "ly"):
-		return "rb"
-	case strings.HasSuffix(loWord, "ate"):
-		return "vb"
-	case strings.HasSuffix(loWord, "fy"):
-		return "vb"
-	case strings.HasSuffix(loWord, "ize"):
-		return "vb"
-	}
-
-	// perform an N for loop checking for capital letter
-	for i = 0; i < len(word); i++ {
-		if word[i] > 64 && word[i] < 91 {
-			return "np"
-		}
-	}
-
-	switch {
-	case strings.HasSuffix(loWord, "ion"):
-		return "nn"
-	case strings.HasSuffix(loWord, "ess"):
-		return "nn"
-	case strings.HasSuffix(loWord, "ment"):
-		return "nn"
-	case strings.HasSuffix(loWord, "er"):
-		return "nn"
-	case strings.HasSuffix(loWord, "or"):
-		return "nn"
-	case strings.HasSuffix(loWord, "ist"):
-		return "nn"
-	case strings.HasSuffix(loWord, "ism"):
-		return "nn"
-	case strings.HasSuffix(loWord, "ship"):
-		return "nn"
-	case strings.HasSuffix(loWord, "hood"):
-		return "nn"
-	case strings.HasSuffix(loWord, "ology"):
-		return "nn"
-	case strings.HasSuffix(loWord, "ty"):
-		return "nn"
-	case strings.HasSuffix(loWord, "y"):
-		return "nn"
-	default:
-		return "fw"
-	}
-}
-
-// Performs several string substitutions so that the tagger has an easier job
-// These calls are to substitute parts of the string for other parts
-// Once the sentence is formatted correctly it returns the string
-func formatSent(rawBytes []byte) []byte {
-	// to ensure a propper formatting.
-	// replace weird copyright symbols
-	// replaces \(co with (c)
-	rawBytes = copyright.ReplaceAll(rawBytes, []byte("(c) ")) // added extra space to preserve byte offset
-
-	// replace contractions
-	// for byte preservation can not do these, but for more accurate tagging
-	// replacing contractions can be useful
-	/*
-		rawBytes = bytes.Replace(rawBytes, []byte("ain't"), []byte("are not"), -1)
-		rawBytes = bytes.Replace(rawBytes, []byte("won't"), []byte("will not"), -1)
-		rawBytes = bytes.Replace(rawBytes, []byte("can't"), []byte("cannot"), -1)
-		rawBytes = bytes.Replace(rawBytes, []byte("n't"), []byte(" not"), -1)
-		rawBytes = bytes.Replace(rawBytes, []byte("'re"), []byte(" are"), -1)
-		rawBytes = bytes.Replace(rawBytes, []byte("'m"), []byte(" am"), -1)
-		rawBytes = bytes.Replace(rawBytes, []byte("'ll"), []byte(" will"), -1)
-		rawBytes = bytes.Replace(rawBytes, []byte("'ve"), []byte(" have"), -1)
-	*/
-	return rawBytes
-}
-
-// returns true if the given byte is a white space character
-func isSpace(b ...byte) bool {
-
-	return bytes.Contains([]byte(" \n\r\t"), b)
-}
-
-// returns true if the given byte is a ASCII symbolic character
-func isSymbol(b ...byte) bool {
-	return bytes.Contains([]byte("~!`@#$%^&*()[]_+-=|}{:;'\"/\\.?><,"), b)
-}
-
-// Given a slice of raw bytes will convert this into a slice of
-// TaggedWord objects with no tag set. This slice of TaggedWord objects will
-// then be given to the tagger for determining the part of speech tag
-func mkWrdArray(rawBytes []byte) []TaggedWord {
-
-	currByte := 0
-	wordStart := currByte
-	var taggedWords []TaggedWord = make([]TaggedWord, 0)
-
-	for currByte < len(rawBytes) {
-		if isSpace(rawBytes[currByte]) {
-			if wordStart != currByte { // add the word if I can
-				taggedWords = append(taggedWords, TaggedWord{Word: string(rawBytes[wordStart:currByte]), Tag: "", byteStart: wordStart})
-			}
-			currByte++
-			wordStart = currByte
-		} else if isSymbol(rawBytes[currByte]) {
-			if wordStart != currByte { // add the word if I can
-				taggedWords = append(taggedWords, TaggedWord{Word: string(rawBytes[wordStart:currByte]), Tag: "", byteStart: wordStart})
-			}
-			wordStart = currByte
-			currByte++
-			taggedWords = append(taggedWords, TaggedWord{Word: string(rawBytes[wordStart:currByte]), Tag: "", byteStart: wordStart})
-			wordStart = currByte
-		} else {
-			currByte++
-		}
-	}
-	taggedWords = append(taggedWords, TaggedWord{Word: string(rawBytes[wordStart:currByte]), Tag: "", byteStart: wordStart})
-	return taggedWords
-}
-
-// Given any string this will return a slice of TaggedWord objects
+// TagBytes returns a slice of TaggedWord objects
 // representing that word in the sentence and the part of speech for
 // that word
 func (copyrightTagger *Tagger) TagBytes(rawBytes []byte) []TaggedWord {
 	// ERROR AND SANITIZATION CHECKS
-	var wrdArry []TaggedWord = make([]TaggedWord, 0)
+	var wrdArry = make([]TaggedWord, 0)
 	if len(rawBytes) < 1 { // do I even need to do any work
 		return wrdArry
 	}
@@ -473,17 +61,20 @@ func (copyrightTagger *Tagger) TagBytes(rawBytes []byte) []TaggedWord {
 
 	// initialize the first column
 	var lastBestProb float32 = 1.0
-	var lastBestTag int = TagStrToInt["."]
+	var lastBestTag = TagStrToInt["."]
 	var currBestProb float32 = 0.0
 	var currBestTag int = 0
 
 	sentMatrix[TagStrToInt["."]][0] = 1.0 // the max probability something can be
 	for wrdIndex := 0; wrdIndex < len(wrdArry); wrdIndex++ {
 		for tagIndex := 0; tagIndex < numOfTags; tagIndex++ {
+			var lowerCaseWord = strings.ToLower(wrdArry[wrdIndex].Word)
+
 			var currTrans float32 = copyrightTagger.TransMatrix[lastBestTag][tagIndex]
 			var currProb float32 = lastBestProb * currTrans
 
 			if len(copyrightTagger.Dictionary[wrdArry[wrdIndex].Word]) != 0 { // has the word been seen before?
+
 				if wrdArry[wrdIndex].Word == "." || wrdArry[wrdIndex].Word == "?" || wrdArry[wrdIndex].Word == "!" {
 					sentMatrix[TagStrToInt["."]][wrdIndex+1] = 1.0
 				} else {
@@ -493,9 +84,9 @@ func (copyrightTagger *Tagger) TagBytes(rawBytes []byte) []TaggedWord {
 						}
 					}
 				}
-				// check for the word not carring about capitalization
-			} else if len(copyrightTagger.Dictionary[strings.ToLower(wrdArry[wrdIndex].Word)]) != 0 {
-				for _, tagObject := range copyrightTagger.Dictionary[strings.ToLower(wrdArry[wrdIndex].Word)] {
+				// check for the word not caring about capitalization
+			} else if len(copyrightTagger.Dictionary[lowerCaseWord]) != 0 {
+				for _, tagObject := range copyrightTagger.Dictionary[lowerCaseWord] {
 					if TagIntToStr[tagIndex] == tagObject.tag {
 						sentMatrix[tagIndex][wrdIndex+1] = currProb * tagObject.freq
 					}
@@ -519,6 +110,7 @@ func (copyrightTagger *Tagger) TagBytes(rawBytes []byte) []TaggedWord {
 	}
 	// Sentence Matrix Created.
 	// Now walk through the matrix assigning the best tag to each word
+
 	for wrdIndex := 0; wrdIndex < len(wrdArry); wrdIndex++ {
 		var tagProb float32 = 0.0
 		for tagIndex := 0; tagIndex < numOfTags; tagIndex++ {

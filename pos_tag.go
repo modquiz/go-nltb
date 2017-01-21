@@ -1,6 +1,7 @@
 package nltb
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -32,6 +33,6 @@ func (p *POSTag) Do(byteString []byte) []TaggedWord {
 
 	var returnTaggedWord []TaggedWord
 	copier.Copy(&returnTaggedWord, &taggedWord)
-
+	fmt.Println(returnTaggedWord)
 	return returnTaggedWord
 }
