@@ -25,6 +25,7 @@ LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
 ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 */
+
 // This file is about the creation of tables that should
 // be able to become import files. And using made tables to tag the parts
 // of speech of possible copyright laced text. Once the text is tagged

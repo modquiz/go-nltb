@@ -2,9 +2,6 @@ package tagger
 
 import (
 	"fmt"
-	"io/ioutil"
-	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -50,9 +47,10 @@ func initTagConversionMap() {
 	TagStrToInt["vbz"] = 31
 	TagStrToInt["md"] = 32
 	TagStrToInt["in"] = 33
-	TagStrToInt["at"] = 34
-	TagStrToInt["bez"] = 35
-	TagStrToInt["ppss"] = 36
+	TagStrToInt["ap"] = 34
+	TagStrToInt["at"] = 35
+	TagStrToInt["bez"] = 36
+	TagStrToInt["ppss"] = 37
 
 	TagIntToStr[0] = "bos"
 	TagIntToStr[1] = "$"
@@ -88,16 +86,22 @@ func initTagConversionMap() {
 	TagIntToStr[31] = "vbz"
 	TagIntToStr[32] = "md"
 	TagIntToStr[33] = "in"
-	TagIntToStr[34] = "at"
-	TagIntToStr[35] = "bez"
-	TagIntToStr[36] = "ppss"
+	TagIntToStr[34] = "ap"
+	TagIntToStr[35] = "at"
+	TagIntToStr[36] = "bez"
+	TagIntToStr[37] = "ppss"
 }
 
 func addToDictionary(dictionary map[string][]TagFrequency, transMatrix [][]float32, path string) (map[string][]TagFrequency, [][]float32) {
 	// read through the corpus file to populate the dictionary and transMatrix
-	raw, err := ioutil.ReadFile(path)
+
+	raw, err := Asset(path)
+
+	//raw, err := ioutil.ReadFile(path)
 	if err != nil && !strings.HasSuffix(path, "\\") {
-		fmt.Printf("could not read the file %v for tagging", path)
+		fmt.Println("-")
+		fmt.Printf("could not read the file %v for tagging\n", path)
+		fmt.Println(err)
 		return dictionary, transMatrix
 	}
 	rawString := string(raw[:])
@@ -147,15 +151,21 @@ func New(searchDir string) *Tagger {
 	}
 
 	// for every fileint he brown corpus do
-	err := filepath.Walk(searchDir, func(searchDir string, f os.FileInfo, err error) error {
-		dictionary, transMatrix = addToDictionary(dictionary, transMatrix, searchDir)
-		return nil
-	})
+	//err := filepath.Walk(searchDir, func(searchDir string, f os.FileInfo, err error) error {
+	//	if f.Name() != "brown" {
 
-	if err != nil {
-		fmt.Println(err)
+	for _, asset := range AssetNames() {
+		dictionary, transMatrix = addToDictionary(dictionary, transMatrix, asset)
 	}
 
+	//	}
+	//	return nil
+	//})
+	/*
+		if err != nil {
+			fmt.Println(err)
+		}
+	*/
 	// SETUP THE COPYRIGHT DFA
 	// symbols, dfa := mkNoticeDFA()
 	return &Tagger{Dictionary: dictionary, TransMatrix: transMatrix}

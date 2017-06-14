@@ -7,7 +7,7 @@ import (
 )
 
 // global const:
-const numOfTags int = 37
+const numOfTags int = 38
 
 // The character used to split the string from the part of speech tag in the Corpus
 const SPLITCHARS string = "/"
